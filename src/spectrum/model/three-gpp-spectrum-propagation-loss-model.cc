@@ -104,7 +104,7 @@ ThreeGppSpectrumPropagationLossModel::GetFrequency () const
 void
 ThreeGppSpectrumPropagationLossModel::SetChannelModelAttribute (const std::string &name, const AttributeValue &value)
 {
-  m_channelModel->SetAttributeFailSafe (name, value);
+  m_channelModel->SetAttribute (name, value);
 }
 
 void
