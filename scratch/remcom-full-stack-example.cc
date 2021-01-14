@@ -40,10 +40,46 @@
 #include "ns3/config-store.h"
 #include "ns3/mmwave-point-to-point-epc-helper.h"
 
-NS_LOG_COMPONENT_DEFINE ("QdChannelModelExample");
+NS_LOG_COMPONENT_DEFINE ("RemcomModelExample");
 
 using namespace ns3;
 using namespace mmwave;
+
+// main variables
+Ptr<QdChannelModel> qdModel;
+Ptr<PacketSink> sinkApp;              // Sink Application at the UE
+Ptr<OutputStreamWrapper> stream1;     // Output stream for the rxed packets
+Ptr<OutputStreamWrapper> stream2;     // Output stream for the rxed packets
+uint32_t timeRes = 20;                // Time resolution in ms
+uint32_t lastRxBytes = 0;
+double blockageValue = 70.0;          // Blockage value [dB] 
+
+static void 
+Rx (Ptr<const Packet> packet, const Address &from)
+{
+  NS_LOG_DEBUG (Simulator::Now ().GetSeconds () << "\t" << packet->GetSize ());
+  //*stream1->GetStream () << Simulator::Now ().GetSeconds () << "\t" << packet->GetSize () << std::endl;
+}
+
+static void
+ComputeE2eThroughput ()
+{
+  uint32_t totRxBytes = sinkApp->GetTotalRx ();   // Total rx bytes 
+  uint32_t rxBytes = totRxBytes - lastRxBytes;
+  lastRxBytes = totRxBytes;
+  double thr = rxBytes * 8.0 / (timeRes * 1e-3) / 1e6;  // Throughput in Mbps
+  NS_LOG_UNCOND (Simulator::Now ().GetSeconds () << "\t" << thr << " Mbps");
+  *stream2->GetStream () << Simulator::Now ().GetSeconds () << "\t" << thr << std::endl;
+
+  Simulator::Schedule (MilliSeconds (timeRes), &ComputeE2eThroughput);
+}
+
+static void 
+ModifyBlockageValue (double blockage)
+{
+  qdModel->SetBlockageValue (blockage);
+  Simulator::Schedule (Seconds (5), &ModifyBlockageValue, 0.0);
+}
 
 int
 main (int argc, char *argv[])
@@ -56,6 +92,8 @@ main (int argc, char *argv[])
   uint16_t enbAntennaNum = 64; // The number of antenna elements for the gNBs antenna arrays, assuming a square architecture
   uint16_t ueAntennaNum = 16; // The number of antenna elements for the UE antenna arrays, assuming a square architecture
   uint32_t appPacketSize = 1460; // Application packet size [B]
+  bool isotropicElements = true; // If true, omnidirectional antenna gain
+  uint32_t bandwidth = 100e6;    // Bandwidth of the system
 
   CommandLine cmd;
   cmd.AddValue ("qdFilesPath", "The path of the folder with the QD scenarios", qdFilesPath);
@@ -98,12 +136,12 @@ main (int argc, char *argv[])
   // Configure the channel
   Config::SetDefault ("ns3::MmWaveHelper::PathlossModel", StringValue (""));
   Config::SetDefault ("ns3::MmWaveHelper::ChannelModel", StringValue ("ns3::ThreeGppSpectrumPropagationLossModel"));
-  Ptr<QdChannelModel> qdModel = CreateObject<QdChannelModel> (qdFilesPath, scenario);
+  qdModel = CreateObject<QdChannelModel> (qdFilesPath, scenario);
   Time simTime = qdModel->GetQdSimTime ();
   Config::SetDefault ("ns3::ThreeGppSpectrumPropagationLossModel::ChannelModel", PointerValue (qdModel));
 
   // Bandwidth 
-  Config::SetDefault ("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue (100e6));
+  Config::SetDefault ("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue (bandwidth));
 
   // Set power and noise figure
   Config::SetDefault ("ns3::MmWaveEnbPhy::TxPower", DoubleValue (txPower));
@@ -112,7 +150,7 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::MmWaveUePhy::NoiseFigure", DoubleValue (noiseFigure));
 
   // Setup antenna configuration
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::IsotropicElements", BooleanValue (true));
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::IsotropicElements", BooleanValue (isotropicElements));
 
   // Create the MmWave helper
   Ptr<MmWaveHelper> mmwaveHelper = CreateObject<MmWaveHelper> ();
@@ -163,6 +201,9 @@ main (int argc, char *argv[])
   // This performs the attachment of each UE to a specific eNB
   mmwaveHelper->AttachToEnbWithIndex (ueMmWaveDevs.Get (0), enbMmWaveDevs, 0);
 
+  // Schedule blockage
+  Simulator::Schedule (Seconds (10), &ModifyBlockageValue, blockageValue);
+
   // Add apps
   uint16_t dlPort = 1234;
   uint16_t ulPort = 2000;
@@ -172,18 +213,32 @@ main (int argc, char *argv[])
   ++ulPort;
   ++otherPort;
   PacketSinkHelper dlPacketSinkHelper ("ns3::UdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), dlPort));
-  serverApps.Add (dlPacketSinkHelper.Install (ueNodes.Get (0)));
+  serverApps.Add (dlPacketSinkHelper.Install (remoteHost));
 
-  UdpClientHelper dlClient (ueIpIface.GetAddress (0), dlPort);
+  /*UdpClientHelper dlClient (ueIpIface.GetAddress (0), dlPort);
   dlClient.SetAttribute ("Interval", TimeValue (MicroSeconds (interPacketInterval)));
   dlClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
   dlClient.SetAttribute ("PacketSize", UintegerValue (appPacketSize));
+  clientApps.Add (dlClient.Install (remoteHost));*/
 
-  clientApps.Add (dlClient.Install (remoteHost));
+  OnOffHelper onOffClient ("ns3::UdpSocketFactory", InetSocketAddress (internetIpIfaces.GetAddress (1), dlPort));
+  onOffClient.SetAttribute ("PacketSize", UintegerValue (appPacketSize));
+  onOffClient.SetAttribute ("DataRate", DataRateValue (DataRate ("1000Mbps")));
+  onOffClient.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0e6]"));
+  onOffClient.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
+  clientApps.Add (onOffClient.Install (ueNodes.Get (0)));
 
-  serverApps.Start (Seconds (0.01));
-  clientApps.Start (Seconds (0.01));
+  serverApps.Start (Seconds (0.001));
+  clientApps.Start (Seconds (0.001));
   mmwaveHelper->EnableTraces ();
+
+  AsciiTraceHelper asciiTraceHelper;
+  stream1 = asciiTraceHelper.CreateFileStream ("rx-packet-trace.txt");
+  stream2 = asciiTraceHelper.CreateFileStream ("thr-vs-time.txt");
+  sinkApp = StaticCast<PacketSink> (serverApps.Get (0));
+  sinkApp->TraceConnectWithoutContext ("Rx", MakeCallback (&Rx));
+
+  Simulator::Schedule (MilliSeconds (timeRes), &ComputeE2eThroughput);
 
   Simulator::Stop (simTime);
   Simulator::Run ();
