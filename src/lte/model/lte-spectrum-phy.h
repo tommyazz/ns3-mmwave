@@ -280,7 +280,7 @@ public:
    *
    * @param c the callback
    */
-  void SetLtePhyTxEndCallback (LtePhyTxEndCallback c);
+  //void SetLtePhyTxEndCallback (LtePhyTxEndCallback c);
 
   /**
    * set the callback for the end of a RX in error, as part of the

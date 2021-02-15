@@ -80,7 +80,7 @@ public:
    */
   MmWaveMacPduHeader ();
 
-  MmWaveMacPduHeader (uint16_t frameNo, uint8_t sfNo, uint8_t slotNo);
+  //MmWaveMacPduHeader (uint16_t frameNo, uint8_t sfNo, uint8_t slotNo);
 
   virtual void  Serialize (Buffer::Iterator i) const;
   virtual uint32_t  Deserialize (Buffer::Iterator i);

@@ -169,7 +169,7 @@ public:
   bool StartTxDataFrames (Ptr<PacketBurst> pb, std::list<Ptr<MmWaveControlMessage> > ctrlMsgList, Time duration, uint8_t slotInd);
 
   bool StartTxDlControlFrames (std::list<Ptr<MmWaveControlMessage> > ctrlMsgList, Time duration);       // control frames from enb to ue
-  bool StartTxUlControlFrames (void);       // control frames from ue to enb
+  //bool StartTxUlControlFrames (void);       // control frames from ue to enb
 
   void SetPhyRxDataEndOkCallback (MmWavePhyRxDataEndOkCallback c);
   void SetPhyRxCtrlEndOkCallback (MmWavePhyRxCtrlEndOkCallback c);

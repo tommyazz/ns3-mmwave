@@ -310,7 +310,7 @@ public:
    * \parmam map (CC ID, blockage attribute value)
    *
    */
-  void SetBlockageMap (std::map<uint8_t, bool> blockageMap);
+  //void SetBlockageMap (std::map<uint8_t, bool> blockageMap);
 
   void EnablePdcpTraces (void);
   void EnableMcTraces (void);

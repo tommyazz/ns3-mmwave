@@ -617,7 +617,7 @@ RrcConnectionSwitchHeader();
 ~RrcConnectionSwitchHeader();
 
 // Inherited from RrcAsn1Header
-static TypeId GetTypeId (void);
+//static TypeId GetTypeId (void);
 void PreSerialize () const;
 uint32_t Deserialize (Buffer::Iterator bIterator);
 void Print (std::ostream &os) const;

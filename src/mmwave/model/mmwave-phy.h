@@ -123,7 +123,7 @@ public:
   MmWavePhySapProvider* GetPhySapProvider ();
 //	void SetPhySapUser (MmWavePhySapUser* ptr);
 
-  void UpdateCurrentAllocationAndSchedule (uint32_t frame, uint32_t sf);
+//  void UpdateCurrentAllocationAndSchedule (uint32_t frame, uint32_t sf);
 
   /**
    * Sets the control data allocation within a NR slot.

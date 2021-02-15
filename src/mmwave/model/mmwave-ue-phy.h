@@ -80,7 +80,7 @@ public:
   void SetNoiseFigure (double pf);
   double GetNoiseFigure () const;
 
-  bool SendPacket (Ptr<Packet> packet);
+  //bool SendPacket (Ptr<Packet> packet);
 
   Ptr<SpectrumValue> CreateTxPowerSpectralDensity () override;
 
@@ -143,7 +143,7 @@ public:
    */
   void InitializeSlotAllocation (uint16_t frameNum, uint8_t sfNum, uint8_t slotNum);
 
-  uint32_t GetSubframeNumber (void);
+  //uint32_t GetSubframeNumber (void);
 
   void PhyDataPacketReceived (Ptr<Packet> p);
   void DelayPhyDataPacketReceived (Ptr<Packet> p);
