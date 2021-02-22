@@ -49,39 +49,59 @@ NS_LOG_COMPONENT_DEFINE ("SccSimulationScenario");
 using namespace ns3;
 using namespace mmwave;
 
-Ptr<PacketSink> sinkApp; // Sink application at the remote host
-uint32_t timeRes = 10; // Time resolution for throughput calculation [ms]
-uint32_t lastRxBytes = 0;
-Ptr<OutputStreamWrapper> stream1, stream2, stream3;
+uint32_t timeRes = 100;
+Ptr<OutputStreamWrapper> stream1, stream2, stream3, stream4;
 
 static void
-ComputeE2eThroughput ()
+ComputeStatistics (ApplicationContainer sinkApps, std::vector<uint32_t> lastRxBytes, std::vector<Ptr<MobilityModel>> mobilityModels)
 {
-  uint32_t totRxBytes = sinkApp->GetTotalRx ();   // Total rx bytes
-  uint32_t rxBytes = totRxBytes - lastRxBytes;
-  lastRxBytes = totRxBytes;
-  double thr = rxBytes * 8.0 / (timeRes * 1e-3) / 1e6;  // Throughput in Mbps
-  NS_LOG_DEBUG (Simulator::Now ().GetSeconds () << "\t" << thr << " Mbps");
-  *stream1->GetStream () << Simulator::Now ().GetSeconds () << "\t" << thr << std::endl;
+  uint32_t totRxBytes, rxBytes;
+  Ptr<PacketSink> sink;
+  Vector pos;
+  double now = Simulator::Now ().GetSeconds ();
+  std::cout << now << "\t";
+  *stream1->GetStream () << now;
+  for (uint32_t i = 0; i < sinkApps.GetN (); ++i)
+  {
+    sink = StaticCast<PacketSink> (sinkApps.Get (i));
+    totRxBytes = sink->GetTotalRx ();
+    rxBytes = totRxBytes - lastRxBytes.at (i);
+    lastRxBytes.at (i) = totRxBytes;
+    double thr = rxBytes * 8.0 / (timeRes * 1e-3) / 1e6;  // Throughput in Mbps
+    pos = mobilityModels.at (i)->GetPosition ();
+    std::cout << thr << "\t";
+    *stream1->GetStream () << "\t" << thr << "\t" << pos.x << "\t" << pos.y;
+  }  
+  std::cout << "Mbps" << std::endl;
+  *stream1->GetStream () << std::endl;
 
-  Simulator::Schedule (MilliSeconds (timeRes), &ComputeE2eThroughput);
+  Simulator::Schedule (MilliSeconds (timeRes), &ComputeStatistics, sinkApps, lastRxBytes, mobilityModels);
 }
 
 static void
-Rx (Ptr<const Packet> pkt, const Address &rxAddr, const Address &txAddr, const SeqTsSizeHeader& hdr)
+Rx (uint32_t appId, Ptr<const Packet> pkt, const Address &rxAddr, const Address &txAddr, const SeqTsSizeHeader& hdr)
 {
-  NS_LOG_DEBUG ("Rx packet with size: " << pkt->GetSize ());
+  NS_LOG_DEBUG ("Rx packet with size: " << pkt->GetSize () << "; appId: " << appId); 
   Time now = Simulator::Now ();
   Time txTime = hdr.GetTs ();
   double pktDelay = now.GetSeconds () - txTime.GetSeconds ();
   NS_LOG_DEBUG ("Delay for packet with seq=" << hdr.GetSeq () << " is: " << pktDelay*1e3 << " ms");
-  *stream2->GetStream () << Simulator::Now ().GetSeconds () << "\t" << pktDelay << std::endl;
+  *stream2->GetStream () << appId << "\t" << Simulator::Now ().GetSeconds () << "\t" << hdr.GetSeq () << "\t" << pkt->GetSize () << "\t" << pktDelay << std::endl;
 }
 
 static void
-Sinr (uint64_t imsi, SpectrumValue& oldSinr, SpectrumValue& newSinr)
+Tx (uint32_t appId, Ptr<const Packet> pkt, const Address &rxAddr, const Address &txAddr, const SeqTsSizeHeader& hdr)
 {
-  NS_LOG_UNCOND (10 * log10 (Sum (newSinr)));
+  NS_LOG_DEBUG ("Tx packet with size: " << pkt->GetSize () << "; appId: " << appId);
+  *stream4->GetStream () << appId << "\t" << Simulator::Now ().GetSeconds () << "\t" << hdr.GetSeq () << "\t" << pkt->GetSize () << std::endl;
+}
+
+static void
+Sinr (uint32_t ueId, uint64_t imsi, SpectrumValue& oldSinr, SpectrumValue& newSinr)
+{
+  double sinr = Sum (newSinr) / (newSinr.GetSpectrumModel ()->GetNumBands ());
+  NS_LOG_DEBUG (Simulator::Now ().GetSeconds () << "\t" << 10*log10 (sinr) << " dB");
+  *stream3->GetStream () << ueId << "\t" << Simulator::Now ().GetSeconds () << "\t" << sinr << std::endl;
 }
 
 int
@@ -89,38 +109,34 @@ main (int argc, char *argv[])
 {
   bool harqEnabled = true;
   bool rlcAmEnabled = true;
-  uint32_t appPacketSize = 1440; // packet size at the application layer [bytes]
+  uint32_t appPacketSize = 1440; // application layer packet size [bytes]
   uint16_t enbAntennaNum = 64; // number of antenna elements at the BS
-  uint16_t ueAntennaNum = 16; // number of antenna elements at the UE
+  uint16_t ueAntennaNum = 4; // number of antenna elements at the UE
   double frequency = 28e9; // operating frequency [Hz]
   double txPow = 30.0; // tx power [dBm]
   double noiseFigure = 9.0; // noise figure [dB]
-  double distance = 50.0; // distance between tx and rx nodes [m]
   uint32_t simTime = 10; // simulation time [s]
   uint32_t updatePeriod = 10; // channel/channel condition update period [ms]
-  uint16_t nonSelfBlocking = 4;
+  uint16_t nonSelfBlocking = 4; // number of self-blocking components for the blockage model
   uint32_t remoteHostDelay = 10; // delay from PGW to remote host [ms]
-  std::string outputFolder = "../scc-results/"; // path to the main output folder for the results
-  std::string scenario = "UMi-StreetCanyon"; // 3GPP propagation scenario
-  bool isBlockage = false;
+  uint32_t uesPerBs = 3; // number of intended UEs associated to the BS
+  uint32_t numberBs = 2; // number of gNBs in the simulation  
+  std::string outputFolder = ""; // path to the main output folder for the results
+  std::string scenario = "UMi-StreetCanyon"; // 3GPP propagation scenario (Urban-Micro)
+  bool isBlockage = true; // enable blockage modeling
   bool enableLog = false;
 
+
   CommandLine cmd;
+  cmd.AddValue ("rlcAmEnabled", "Enable RLC AM mode at RLC layer", rlcAmEnabled);
+  cmd.AddValue ("harqEnabled", "Enable HARQ at the MAC layer", harqEnabled);
   cmd.AddValue ("updatePeriod", "Channel/channel condition update periodicity [ms]", updatePeriod);
   cmd.AddValue ("blockage", "Enable blockage model A of the 3GPP channel model", isBlockage);
   cmd.AddValue ("nonSelfBlocking", "Number of non self-blocking components", nonSelfBlocking);
-  cmd.AddValue ("distance", "Initial distance from the gNB [m]", distance);
-  cmd.AddValue ("log", "Enable logging components", enableLog);
+  cmd.AddValue ("uesPerBs", "Number of UE connected to each BS", uesPerBs);
+  cmd.AddValue ("numBs", "Number of gNBs in the simulation", numberBs);
+  cmd.AddValue ("simTime", "Simulation time [s]", simTime);
   cmd.Parse (argc, argv);
-
-  RngSeedManager::SetSeed (1);
-  RngSeedManager::SetRun (1);
-
-  std::string blockageOutput = "no-blockage-";
-  if (isBlockage)
-  {
-    blockageOutput = "yes-blockage-";
-  }
 
   if (enableLog)
   {
@@ -136,6 +152,7 @@ main (int argc, char *argv[])
   // setting the 3GPP channel model
   Config::SetDefault ("ns3::ThreeGppChannelModel::Blockage", BooleanValue (isBlockage));
   Config::SetDefault ("ns3::ThreeGppChannelModel::NumNonselfBlocking", IntegerValue (nonSelfBlocking));
+  Config::SetDefault ("ns3::ThreeGppChannelModel::BlockerSpeed", DoubleValue (1.5));
   Config::SetDefault ("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue (MilliSeconds (updatePeriod)));
   Config::SetDefault ("ns3::ThreeGppChannelModel::PortraitMode", BooleanValue (false)); // blockage model with UT in landscape mode
   Config::SetDefault ("ns3::ThreeGppChannelConditionModel::UpdatePeriod", TimeValue (MilliSeconds (updatePeriod)));
@@ -212,22 +229,49 @@ main (int argc, char *argv[])
   // create nodes
   NodeContainer enbNodes;
   NodeContainer ueNodes;
-  enbNodes.Create (1);
-  ueNodes.Create (1);
+  enbNodes.Create (numberBs);
+  ueNodes.Create (numberBs * uesPerBs);
 
-  // create mobility models
-  Ptr<MobilityModel> enbMobility= CreateObject<ConstantPositionMobilityModel> ();
-  enbMobility->SetPosition (Vector (0.0, 0.0, 10.0));
-  Ptr<MobilityModel> ueMobility = CreateObject<RandomWalk2dOutdoorMobilityModel> (); // 2D random walk mobility model for the UE
-  ueMobility->SetPosition (Vector (distance, 0.0, 1.6));
-  ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (-200.0, 200.0, -200.0, 200.0)));
-  ueMobility->SetAttribute ("Mode", EnumValue (RandomWalk2dOutdoorMobilityModel::MODE_DISTANCE)); // updating mode for UE direction and speed
-  ueMobility->SetAttribute ("Distance", DoubleValue (2.0)); // update UE direction and speed every VALUE meters walked
+  // assign mobility models to BSs
+  Ptr<ListPositionAllocator> enbPositionAlloc = CreateObject<ListPositionAllocator> ();
+  enbPositionAlloc->Add (Vector (0.0, 0.0, 10.0)); // position of the intended BS
+  enbPositionAlloc->Add (Vector (200.0, 0.0, 10.0)); // position of the interfering BS
+  MobilityHelper mobilityHelper;
+  mobilityHelper.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobilityHelper.SetPositionAllocator (enbPositionAlloc);
+  for (uint32_t i = 0; i < enbNodes.GetN (); ++i)
+  {
+    mobilityHelper.Install (enbNodes.Get (i)); // install the mobility model in each BS
+  }
 
-  // assign mobility models to the nodes
-  enbNodes.Get (0)->AggregateObject (enbMobility);
-  ueNodes.Get (0)->AggregateObject (ueMobility);
+  Ptr<UniformRandomVariable> uniform = CreateObject<UniformRandomVariable> ();
+  double x,y;
+  for (uint32_t i = 0; i < ueNodes.GetN (); ++i)
+  {
+    Ptr<MobilityModel> ueMobility = CreateObject<RandomWalk2dOutdoorMobilityModel> (); // 2D random walk mobility model for each UE
+    ueMobility->SetAttribute ("Mode", EnumValue (RandomWalk2dOutdoorMobilityModel::MODE_TIME)); // updating mode for UE direction and speed
+    ueMobility->SetAttribute ("Time", TimeValue (Seconds (10)));
+    //ueMobility->SetAttribute ("Distance", DoubleValue (2.0)); // update UE direction and speed every VALUE meters walked
+    
+    if (i < ueNodes.GetN ()/numberBs)
+    {
+      // intended UEs initial position
+      x = 100.0 * uniform->GetValue ();
+      y = -100.0 + 200.0 * uniform->GetValue (); 
+      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (-100.0, 200.0, -100.0, 100.0))); // intended UEs random walk bounds     
+    }
+    else
+    {
+      // interfering UEs initial position
+      x = 100.0 * uniform->GetValue () + 100.0;
+      y = -100.0 + 200.0 * uniform->GetValue ();
+      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (0.0, 300.0, -100.0, 100.0)));
+    }
 
+    ueMobility->SetPosition (Vector (x, y, 1.5));
+    ueNodes.Get (i)->AggregateObject (ueMobility);
+  }
+  
   // Create the tx and rx devices
   NetDeviceContainer enbMmWaveDevs = mmwaveHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueMmWaveDevs = mmwaveHelper->InstallUeDevice (ueNodes);
@@ -236,57 +280,105 @@ main (int argc, char *argv[])
   internet.Install (ueNodes);
   Ipv4InterfaceContainer ueIpIface;
   ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueMmWaveDevs)); // assign IP address to UEs
-  Ptr<Node> ueNode = ueNodes.Get (0); // set the default gateway for the UE
-  Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
-  ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
-
-  // attach UE to the Mmwave BS
+  Ptr<Node> ueNode = ueNodes.Get (0); 
+  // set the default gateway for the UES
+  Ptr<Ipv4StaticRouting> ueStaticRouting;
+  for (uint32_t i = 0; i < ueNodes.GetN (); ++i)
+  {
+    ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNodes.Get (i)->GetObject<Ipv4> ());
+    ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
+  }
+  
+  // attach UEs to the Mmwave BSs
   mmwaveHelper->AttachToClosestEnb (ueMmWaveDevs, enbMmWaveDevs);
 
-  // create applications
   uint16_t ulPort = 2000;
-
-  ApplicationContainer clientApps;
-  ApplicationContainer serverApps;
-  ++ulPort;
-  PacketSinkHelper ulPacketSinkHelper ("ns3::UdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), ulPort));
-  ulPacketSinkHelper.SetAttribute ("EnableSeqTsSizeHeader", BooleanValue (true)); // enable SeqTs header to measure end-to-end delay
-  serverApps.Add (ulPacketSinkHelper.Install (remoteHost));
-
-  OnOffHelper ulOnOffHelper ("ns3::UdpSocketFactory", InetSocketAddress (remoteHostAddr, ulPort));
-  ulOnOffHelper.SetAttribute ("EnableSeqTsSizeHeader", BooleanValue (true)); // enable SeqTs header to measure end-to-end delay
-  ulOnOffHelper.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=10000.0]"));
-  ulOnOffHelper.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
-  ulOnOffHelper.SetAttribute ("DataRate", DataRateValue (DataRate ("100Mbps")));
-  ulOnOffHelper.SetAttribute ("PacketSize", UintegerValue (appPacketSize));
-  clientApps.Add (ulOnOffHelper.Install (ueNode));
-
-  Time appStartTime = Seconds (0.01);
-  serverApps.Start (appStartTime);
-  clientApps.Start (appStartTime);
+  std::vector<double> appStartTime (ueNodes.GetN ());
+  ApplicationContainer clientInterfApps, clientIntendedApps;
+  ApplicationContainer serverInterfApps, serverIntendedApps;
+  // for each UE create a CBR application @100 Mbps (uplink traffic from the UE to the remote host) 
+  for (uint32_t i = 0; i < ueNodes.GetN (); ++i)
+  {
+    ++ulPort;
+    // create the sink 
+    PacketSinkHelper ulPacketSinkHelper ("ns3::UdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), ulPort));
+    ulPacketSinkHelper.SetAttribute ("EnableSeqTsSizeHeader", BooleanValue (true)); // enable SeqTs header to measure end-to-end delay
+    // create the CBR application
+    OnOffHelper ulOnOffHelper ("ns3::UdpSocketFactory", InetSocketAddress (remoteHostAddr, ulPort));
+    ulOnOffHelper.SetAttribute ("EnableSeqTsSizeHeader", BooleanValue (true)); // enable SeqTs header to measure end-to-end delay
+    ulOnOffHelper.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=100000.0]"));
+    ulOnOffHelper.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
+    ulOnOffHelper.SetAttribute ("DataRate", DataRateValue (DataRate ("100Mbps")));
+    ulOnOffHelper.SetAttribute ("PacketSize", UintegerValue (appPacketSize));
+    // randomize the starting time 
+    appStartTime.at (i) = uniform->GetValue (0.1, 0.4);
+    ulOnOffHelper.SetAttribute ("StartTime", TimeValue (Seconds (appStartTime.at (i))));
+    
+    if (i < ueNodes.GetN ()/numberBs)
+    {
+      serverIntendedApps.Add (ulPacketSinkHelper.Install (remoteHost));
+      clientIntendedApps.Add (ulOnOffHelper.Install (ueNodes.Get (i)));
+    }
+    else
+    {
+      serverInterfApps.Add (ulPacketSinkHelper.Install (remoteHost));
+      clientInterfApps.Add (ulOnOffHelper.Install (ueNodes.Get (i)));
+    }
+  }
 
   // (OPTIONAL) enable output traces
-  // mmwaveHelper->EnableTraces ();
+  mmwaveHelper->EnableTraces ();
 
   AsciiTraceHelper asciiTraceHelper;
-  stream1 = asciiTraceHelper.CreateFileStream (outputFolder+blockageOutput+"thr-trace.csv");
-  stream2 = asciiTraceHelper.CreateFileStream (outputFolder+blockageOutput+"delay-trace.csv");
-  stream3 = asciiTraceHelper.CreateFileStream (outputFolder+blockageOutput+"snr-trace.csv");
+  stream1 = asciiTraceHelper.CreateFileStream (outputFolder+"thr-mobility.csv");
+  stream2 = asciiTraceHelper.CreateFileStream (outputFolder+"rx-packet-trace.csv");
+  stream3 = asciiTraceHelper.CreateFileStream (outputFolder+"sinr-trace.csv");
+  stream4 = asciiTraceHelper.CreateFileStream (outputFolder+"tx-packet-trace.csv");
 
-  // connect to traces
-  Ptr<MmWaveUeNetDevice> ueNetDev = StaticCast <MmWaveUeNetDevice> (ueMmWaveDevs.Get (0));
-  Ptr<MmWaveUePhy> uePhy = ueNetDev->GetPhy ();
-  uePhy->TraceConnectWithoutContext ("ReportCurrentCellRsrpSinr", MakeCallback (&Sinr));
-  sinkApp = StaticCast<PacketSink> (serverApps.Get (0));
-  sinkApp->TraceConnectWithoutContext ("RxWithSeqTsSize", MakeCallback (&Rx));
-  Simulator::Schedule (appStartTime, &ComputeE2eThroughput);
+  // SINR traces of the intended UEs
+  uint32_t i = 0;
+  Ptr<MmWaveUePhy> uePhy;
+  while (i < ueMmWaveDevs.GetN ()/numberBs)
+  {
+    uePhy = StaticCast <MmWaveUeNetDevice> (ueMmWaveDevs.Get (i))->GetPhy ();
+    uePhy->TraceConnectWithoutContext ("ReportCurrentCellRsrpSinr", MakeBoundCallback (&Sinr, i));
+    i++;
+  }
+
+  // App layer traces: collect statistics of intended UEs
+  for (uint32_t i = 0; i < serverIntendedApps.GetN (); ++i)
+  {
+    serverIntendedApps.Get (i)->TraceConnectWithoutContext ("RxWithSeqTsSize", MakeBoundCallback (&Rx, i));
+  }
+
+  for (uint32_t i = 0; i < clientIntendedApps.GetN (); ++i)
+  {
+    clientIntendedApps.Get (i)->TraceConnectWithoutContext ("TxWithSeqTsSize", MakeBoundCallback (&Tx, i));
+  }
+
+  // collect mobility of the UEs
+  std::vector<Ptr<MobilityModel>> mobilityModels (ueNodes.GetN ()/numberBs);
+  for (uint32_t i = 0; i < ueNodes.GetN ()/numberBs; ++i)
+  {
+    mobilityModels.at (i) = ueNodes.Get (i)->GetObject<MobilityModel> ();
+    Vector initPos = mobilityModels.at (i)->GetPosition ();
+    *stream1->GetStream () << 255.0 << "\t" << initPos.x << "\t" << initPos.y << std::endl;
+  }
+
+  // print applications start time
+  for (uint32_t i = 0; i < appStartTime.size (); ++i)
+  {
+    *stream2->GetStream () << "\t" << appStartTime.at(i);
+  }
+  *stream2->GetStream () << std::endl;
+  
+  double maxAppStartTime = *std::max_element (appStartTime.begin (), appStartTime.end ());
+  std::vector<uint32_t> lastRxBytes (serverIntendedApps.GetN (), 0);
+  Simulator::Schedule (Seconds (maxAppStartTime), &ComputeStatistics, serverIntendedApps, lastRxBytes, mobilityModels);
 
   Simulator::Stop (Seconds (simTime));
   Simulator::Run ();
   Simulator::Destroy ();
-
-  // double sum = std::accumulate(std::begin(snrVsTime), std::end(snrVsTime), 0.0);
-  // NS_LOG_UNCOND ("Average SNR over Time=" << sum / snrVsTime.size() << " dB");
 
   return 0;
 }

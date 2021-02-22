@@ -13,6 +13,8 @@ import math
 import torch
 
 totRx = 0
+totPktRx = 0
+delayAcc = 0
 lastRxBytes = 0
 
 def ComputeE2eThroughput(timeRes):
@@ -25,11 +27,19 @@ def ComputeE2eThroughput(timeRes):
     ns.core.Simulator.Schedule (ns.core.MilliSeconds (timeRes), ComputeE2eThroughput, timeRes)
 
 def rx_callback(socket):
-    global totRx
+    global totRx, totPktRx, delayAcc
     fromAddr = ns.network.Address()
     packet = socket.RecvFrom(fromAddr)
     #print("rx bytes", packet.GetSize(), " from ", ns.network.InetSocketAddress.ConvertFrom(fromAddr).GetIpv4 ())
     totRx += packet.GetSize()
+    header = ns.applications.SeqTsSizeHeader()
+    packet.PeekHeader (header)
+    if header.GetSize() > 0:
+        now = ns.core.Simulator.Now().GetSeconds()
+        headerTimestamp = header.GetTs().GetSeconds()
+        delayAcc += now - headerTimestamp
+        totPktRx +=1
+
     #print(totRx)
 
 def SetSocketRxCallback(app):
@@ -70,6 +80,7 @@ def main(argv):
     cmd.AddValue ("blockage", "Enable blockage model A of the 3GPP channel model")
     cmd.AddValue ("nonSelfBlocking", "Number of non self-blocking components")
     cmd.AddValue ("distance", "Initial distance from the gNB [m]")
+    cmd.AddValue ("simTime", "Total simulation time [s]")
     cmd.AddValue ("log", "Enable logging components")
 
     cmd.Parse(argv)
@@ -242,11 +253,12 @@ def main(argv):
     
     ns.core.Simulator.Schedule(appStartTime+ns.core.Seconds(0.00001), SetSocketRxCallback, sinkApp)
     ns.core.Simulator.Schedule(appStartTime, ComputeE2eThroughput, timeRes)
-    ns.core.Simulator.Schedule(ns.core.Seconds(1.0), torch_cuda)
+    ns.core.Simulator.Schedule(ns.core.Seconds(0.5), torch_cuda)
 
-    ns.core.Simulator.Stop(ns.core.Seconds(2.0))
+    ns.core.Simulator.Stop(ns.core.Seconds(simTime))
     ns.core.Simulator.Run()
     ns.core.Simulator.Destroy()
+    
     return 0
 
 
