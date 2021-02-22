@@ -121,6 +121,7 @@ main (int argc, char *argv[])
   uint32_t remoteHostDelay = 10; // delay from PGW to remote host [ms]
   uint32_t uesPerBs = 3; // number of intended UEs associated to the BS
   uint32_t numberBs = 2; // number of gNBs in the simulation  
+  uint32_t changeDirectionTime = 30; // trigger direction change for the random walk
   std::string outputFolder = ""; // path to the main output folder for the results
   std::string scenario = "UMi-StreetCanyon"; // 3GPP propagation scenario (Urban-Micro)
   bool isBlockage = true; // enable blockage modeling
@@ -250,7 +251,7 @@ main (int argc, char *argv[])
   {
     Ptr<MobilityModel> ueMobility = CreateObject<RandomWalk2dOutdoorMobilityModel> (); // 2D random walk mobility model for each UE
     ueMobility->SetAttribute ("Mode", EnumValue (RandomWalk2dOutdoorMobilityModel::MODE_TIME)); // updating mode for UE direction and speed
-    ueMobility->SetAttribute ("Time", TimeValue (Seconds (10)));
+    ueMobility->SetAttribute ("Time", TimeValue (Seconds (changeDirectionTime)));
     //ueMobility->SetAttribute ("Distance", DoubleValue (2.0)); // update UE direction and speed every VALUE meters walked
     
     if (i < ueNodes.GetN ()/numberBs)
@@ -327,7 +328,7 @@ main (int argc, char *argv[])
   }
 
   // (OPTIONAL) enable output traces
-  mmwaveHelper->EnableTraces ();
+  // mmwaveHelper->EnableTraces ();
 
   AsciiTraceHelper asciiTraceHelper;
   stream1 = asciiTraceHelper.CreateFileStream (outputFolder+"thr-mobility.csv");
