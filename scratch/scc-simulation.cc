@@ -111,7 +111,7 @@ main (int argc, char *argv[])
   bool rlcAmEnabled = true;
   uint32_t appPacketSize = 1440; // application layer packet size [bytes]
   uint16_t enbAntennaNum = 64; // number of antenna elements at the BS
-  uint16_t ueAntennaNum = 4; // number of antenna elements at the UE
+  uint16_t ueAntennaNum = 16; // number of antenna elements at the UE
   double frequency = 28e9; // operating frequency [Hz]
   double txPow = 30.0; // tx power [dBm]
   double noiseFigure = 9.0; // noise figure [dB]
@@ -161,11 +161,31 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::MmWavePhyMacCommon::CenterFreq", DoubleValue (frequency));
 
   // antenna settings
+  /*double lightSpeed = 2.99792458e8;
+  double lambda = lightSpeed/frequency;
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::AntennaHorizontalSpacing", DoubleValue (2*lambda));
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::AntennaVerticalSpacing", DoubleValue (2*lambda));
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::DowntiltAngle", DoubleValue (M_PI/6));
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::BearingAngle", DoubleValue (-M_PI/2));
+  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::ElementGain", DoubleValue (8.0));*/
   Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::IsotropicElements", BooleanValue (true));
+  
 
   Config::SetDefault ("ns3::MmWaveHelper::RlcAmEnabled", BooleanValue (rlcAmEnabled));
   Config::SetDefault ("ns3::MmWaveHelper::HarqEnabled", BooleanValue (harqEnabled));
+  Config::SetDefault ("ns3::MmWaveHelper::BeamformingModel", StringValue ("ns3::MmWaveSvdBeamforming"));
   Config::SetDefault ("ns3::MmWaveFlexTtiMacScheduler::HarqEnabled", BooleanValue (harqEnabled));
+
+  std::cout << "rlcAmEnabled: " << rlcAmEnabled << std::endl;
+  std::cout << "harqEnabled: " << harqEnabled << std::endl;
+  std::cout << "updatePeriod: " << updatePeriod << std::endl;
+  std::cout << "blockage: " << isBlockage << std::endl;
+  std::cout << "nonSelfBlocking: " << nonSelfBlocking << std::endl;
+  std::cout << "uesPerBs: " << uesPerBs << std::endl;
+  std::cout << "numBs: " << numberBs << std::endl;
+  std::cout << "simTime: " << simTime << std::endl;
+  std::cout << "Seed: " << ns3::RngSeedManager::GetSeed () << std::endl;
+  std::cout << "Run: " << ns3::RngSeedManager::GetRun () << std::endl;
 
   Ptr<MmWaveHelper> mmwaveHelper = CreateObject<MmWaveHelper> ();
 
@@ -257,19 +277,19 @@ main (int argc, char *argv[])
     if (i < ueNodes.GetN ()/numberBs)
     {
       // intended UEs initial position
-      x = 100.0 * uniform->GetValue ();
-      y = -100.0 + 200.0 * uniform->GetValue (); 
-      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (-100.0, 200.0, -100.0, 100.0))); // intended UEs random walk bounds     
+      x = 200.0 * uniform->GetValue () - 100.0;
+      y = 200.0 * uniform->GetValue () - 100.0; 
+      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (-100.0, 100.0, -100.0, 100.0))); // intended UEs random walk bounds     
     }
     else
     {
       // interfering UEs initial position
-      x = 100.0 * uniform->GetValue () + 100.0;
-      y = -100.0 + 200.0 * uniform->GetValue ();
-      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (0.0, 300.0, -100.0, 100.0)));
+      x = 200.0 * uniform->GetValue () + 100.0;
+      y = 200.0 * uniform->GetValue () - 100.0;
+      ueMobility->SetAttribute ("Bounds", RectangleValue (Rectangle (100.0, 300.0, -100.0, 100.0)));
     }
 
-    ueMobility->SetPosition (Vector (x, y, 1.5));
+    ueMobility->SetPosition (Vector (x, y, 1.6));
     ueNodes.Get (i)->AggregateObject (ueMobility);
   }
   
