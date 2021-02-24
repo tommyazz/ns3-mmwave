@@ -109,6 +109,7 @@ main (int argc, char *argv[])
 {
   bool harqEnabled = true;
   bool rlcAmEnabled = true;
+  double bandwidth = 100e6; // bandwidth of the simulation [MHz]
   uint32_t appPacketSize = 1440; // application layer packet size [bytes]
   uint16_t enbAntennaNum = 64; // number of antenna elements at the BS
   uint16_t ueAntennaNum = 16; // number of antenna elements at the UE
@@ -116,15 +117,15 @@ main (int argc, char *argv[])
   double txPow = 30.0; // tx power [dBm]
   double noiseFigure = 9.0; // noise figure [dB]
   uint32_t simTime = 10; // simulation time [s]
-  uint32_t updatePeriod = 10; // channel/channel condition update period [ms]
+  uint32_t updatePeriod = 100; // channel/channel condition update period [ms]
   uint16_t nonSelfBlocking = 4; // number of self-blocking components for the blockage model
   uint32_t remoteHostDelay = 10; // delay from PGW to remote host [ms]
-  uint32_t uesPerBs = 3; // number of intended UEs associated to the BS
-  uint32_t numberBs = 2; // number of gNBs in the simulation  
+  uint32_t uesPerBs = 2; // number of intended UEs associated to the BS
+  uint32_t numberBs = 1; // number of gNBs in the simulation  
   uint32_t changeDirectionTime = 30; // trigger direction change for the random walk
   std::string outputFolder = ""; // path to the main output folder for the results
   std::string scenario = "UMi-StreetCanyon"; // 3GPP propagation scenario (Urban-Micro)
-  bool isBlockage = true; // enable blockage modeling
+  bool isBlockage = false; // enable blockage modeling
   bool enableLog = false;
 
 
@@ -157,24 +158,23 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue (MilliSeconds (updatePeriod)));
   Config::SetDefault ("ns3::ThreeGppChannelModel::PortraitMode", BooleanValue (false)); // blockage model with UT in landscape mode
   Config::SetDefault ("ns3::ThreeGppChannelConditionModel::UpdatePeriod", TimeValue (MilliSeconds (updatePeriod)));
-  Config::SetDefault ("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue (100e6)); // fixed 100 MHz bandwidth
+  Config::SetDefault ("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue (bandwidth)); // fixed 100 MHz bandwidth
   Config::SetDefault ("ns3::MmWavePhyMacCommon::CenterFreq", DoubleValue (frequency));
-
-  // antenna settings
-  /*double lightSpeed = 2.99792458e8;
-  double lambda = lightSpeed/frequency;
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::AntennaHorizontalSpacing", DoubleValue (2*lambda));
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::AntennaVerticalSpacing", DoubleValue (2*lambda));
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::DowntiltAngle", DoubleValue (M_PI/6));
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::BearingAngle", DoubleValue (-M_PI/2));
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::ElementGain", DoubleValue (8.0));*/
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::IsotropicElements", BooleanValue (true));
   
+  Config::SetDefault ("ns3::LteRlcAm::ReportBufferStatusTimer", TimeValue (MicroSeconds (100.0)));
+  Config::SetDefault ("ns3::LteRlcUmLowLat::ReportBufferStatusTimer", TimeValue (MicroSeconds (100.0)));
+  Config::SetDefault ("ns3::LteRlcUm::ReportBufferStatusTimer", TimeValue (MicroSeconds (100.0)));
+  Config::SetDefault ("ns3::LteRlcUmLowLat::ReorderingTimeExpires", TimeValue (MilliSeconds (10.0)));
+  Config::SetDefault ("ns3::LteRlcUm::ReorderingTimer", TimeValue (MilliSeconds (10.0)));
+  Config::SetDefault ("ns3::LteRlcAm::ReorderingTimer", TimeValue (MilliSeconds (10.0)));
+  Config::SetDefault ("ns3::LteRlcUm::MaxTxBufferSize", UintegerValue (10 * 1024 * 1024));
+  Config::SetDefault ("ns3::LteRlcUmLowLat::MaxTxBufferSize", UintegerValue (10 * 1024 * 1024));
+  Config::SetDefault ("ns3::LteRlcAm::MaxTxBufferSize", UintegerValue (10 * 1024 * 1024));
 
   Config::SetDefault ("ns3::MmWaveHelper::RlcAmEnabled", BooleanValue (rlcAmEnabled));
   Config::SetDefault ("ns3::MmWaveHelper::HarqEnabled", BooleanValue (harqEnabled));
-  Config::SetDefault ("ns3::MmWaveHelper::BeamformingModel", StringValue ("ns3::MmWaveSvdBeamforming"));
   Config::SetDefault ("ns3::MmWaveFlexTtiMacScheduler::HarqEnabled", BooleanValue (harqEnabled));
+  Config::SetDefault ("ns3::MmWaveHelper::BeamformingModel", StringValue ("ns3::MmWaveSvdBeamforming"));
 
   std::cout << "rlcAmEnabled: " << rlcAmEnabled << std::endl;
   std::cout << "harqEnabled: " << harqEnabled << std::endl;
@@ -255,8 +255,8 @@ main (int argc, char *argv[])
 
   // assign mobility models to BSs
   Ptr<ListPositionAllocator> enbPositionAlloc = CreateObject<ListPositionAllocator> ();
-  enbPositionAlloc->Add (Vector (0.0, 0.0, 10.0)); // position of the intended BS
-  enbPositionAlloc->Add (Vector (200.0, 0.0, 10.0)); // position of the interfering BS
+  enbPositionAlloc->Add (Vector (-100.0, 0.0, 10.0)); // position of the intended BS
+  enbPositionAlloc->Add (Vector (100.0, 0.0, 10.0)); // position of the interfering BS
   MobilityHelper mobilityHelper;
   mobilityHelper.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobilityHelper.SetPositionAllocator (enbPositionAlloc);
@@ -296,6 +296,25 @@ main (int argc, char *argv[])
   // Create the tx and rx devices
   NetDeviceContainer enbMmWaveDevs = mmwaveHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueMmWaveDevs = mmwaveHelper->InstallUeDevice (ueNodes);
+
+  Ptr<MmWaveEnbNetDevice> enbNetDevice;
+  for (uint32_t i = 0; i < enbMmWaveDevs.GetN (); ++i)
+  {
+    enbNetDevice = StaticCast<MmWaveEnbNetDevice> (enbMmWaveDevs.Get (i));
+    Ptr<ThreeGppAntennaArrayModel> antenna = enbNetDevice->GetPhy ()->GetDlSpectrumPhy ()->GetBeamformingModel ()->GetAntenna ();
+    //antenna->SetAttribute ("DowntiltAngle", DoubleValue (DegreesToRadians (30.0)));
+    //antenna->SetAttribute ("BearingAngle" , DoubleValue (DegreesToRadians (90.0)));
+    antenna->SetAttribute ("IsotropicElements", BooleanValue (true));
+  }
+
+  Ptr<MmWaveUeNetDevice> ueNetDevice;
+  for (uint32_t i = 0; i < ueMmWaveDevs.GetN (); ++i)
+  {
+    ueNetDevice = StaticCast<MmWaveUeNetDevice> (ueMmWaveDevs.Get (i));
+    Ptr<ThreeGppAntennaArrayModel> antenna = ueNetDevice->GetPhy ()->GetDlSpectrumPhy ()->GetBeamformingModel ()->GetAntenna ();
+    //antenna->SetAttribute ("BearingAngle" , DoubleValue (DegreesToRadians (-90.0)));
+    antenna->SetAttribute ("IsotropicElements", BooleanValue (true));
+  }
 
   // install the IP stack on the UEs
   internet.Install (ueNodes);
