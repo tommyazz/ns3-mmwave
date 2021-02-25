@@ -132,7 +132,6 @@ main (int argc, char *argv[])
   uint16_t enbAntennaNum = 1; // The number of antenna elements for the gNBs antenna arrays, assuming a square architecture
   uint16_t ueAntennaNum = 1; // The number of antenna elements for the UE antenna arrays, assuming a square architecture
   uint32_t appPacketSize = 1460; // Application packet size [B]
-  bool isotropicElements = true; // If true, omnidirectional antenna gain
   uint32_t bandwidth = 400e6;    // Bandwidth of the system
   bool fullStack = false;
 
@@ -187,9 +186,6 @@ main (int argc, char *argv[])
   Time simTime = qdModel->GetQdSimTime ();
   Config::SetDefault ("ns3::ThreeGppSpectrumPropagationLossModel::ChannelModel", PointerValue (qdModel));
 
-  // Setup antenna configuration
-  Config::SetDefault ("ns3::ThreeGppAntennaArrayModel::IsotropicElements", BooleanValue (isotropicElements));
-
   // Create the MmWave helper
   Ptr<MmWaveHelper> mmwaveHelper = CreateObject<MmWaveHelper> ();
   mmwaveHelper->SetMmWaveEnbNetDeviceAttribute("AntennaNum", UintegerValue (enbAntennaNum));
@@ -229,6 +225,19 @@ main (int argc, char *argv[])
   enbNetDev = enbMmWaveDevs.Get (0);
   AsciiTraceHelper asciiTraceHelper;
 
+  Ptr<MmWaveEnbNetDevice> enbNetDevice = StaticCast<MmWaveEnbNetDevice> (enbMmWaveDevs.Get (0));
+  Ptr<ThreeGppAntennaArrayModel> enbAntenna = enbNetDevice->GetPhy ()->GetDlSpectrumPhy ()->GetBeamformingModel ()->GetAntenna ();
+  //enbAntenna->SetAttribute ("DowntiltAngle", DoubleValue (DegreesToRadians (12.0)));
+  // enbAntenna->SetAttribute ("BearingAngle" , DoubleValue (DegreesToRadians (0.0)));
+  //enbAntenna->SetAttribute ("ElementGain" , DoubleValue (8.0));
+  enbAntenna->SetAttribute ("IsotropicElements", BooleanValue (true));
+  
+  Ptr<MmWaveUeNetDevice> ueNetDevice = StaticCast<MmWaveUeNetDevice> (ueMmWaveDevs.Get (0));
+  Ptr<ThreeGppAntennaArrayModel> ueAntenna = ueNetDevice->GetPhy ()->GetDlSpectrumPhy ()->GetBeamformingModel ()->GetAntenna ();
+  //ueAntenna->SetAttribute ("DowntiltAngle" , DoubleValue (DegreesToRadians (180.0)));
+  //ueAntenna->SetAttribute ("ElementGain" , DoubleValue (8.0));
+  ueAntenna->SetAttribute ("IsotropicElements", BooleanValue (true));
+
   if (!fullStack)
     {
       // create the psd of the transmitted signal and of the noise
@@ -239,7 +248,6 @@ main (int argc, char *argv[])
       {
         activeRbs.push_back (i);
       }
-      NS_LOG_UNCOND (activeRbs.size ());
       txPsd = MmWaveSpectrumValueHelper::CreateTxPowerSpectralDensity (mwpmc, txPower, activeRbs);
       noisePsd = MmWaveSpectrumValueHelper::CreateNoisePowerSpectralDensity (mwpmc, noiseFigure);
       
